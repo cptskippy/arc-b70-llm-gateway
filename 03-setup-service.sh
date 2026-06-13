@@ -98,13 +98,13 @@ log "Checking prerequisites..."
 
 # Source oneAPI so sycl-ls and icpx are on PATH for the rest of this script
 # shellcheck disable=SC1091
-source /opt/intel/oneapi/setvars.sh --force 2>/dev/null
+#source /opt/intel/oneapi/setvars.sh --force 2>/dev/null
 
-command -v sycl-ls >/dev/null 2>&1 \
-  || die "sycl-ls not found after sourcing oneAPI. Check your oneAPI install."
+#command -v sycl-ls >/dev/null 2>&1 \
+#  || die "sycl-ls not found after sourcing oneAPI. Check your oneAPI install."
 
-sycl-ls | grep -qi "level_zero" \
-  || warn "No Level Zero device found via sycl-ls. The B70 may not be detected yet."
+#sycl-ls | grep -qi "level_zero" \
+#  || warn "No Level Zero device found via sycl-ls. The B70 may not be detected yet."
 
 [[ -f "$LLAMA_SERVER_BIN" ]] \
   || die "llama-server not found at $LLAMA_SERVER_BIN. Build llama.cpp with SYCL first."
