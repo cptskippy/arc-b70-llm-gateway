@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# llm-swap — preload / inspect / unload models in llama-swap.
+#
+# Usage:
+#   llm-swap <model>     preload <model> (warms it; subsequent requests are fast)
+#   llm-swap list        list configured models
+#   llm-swap status      show currently running model
+#   llm-swap unload      unload current model (frees VRAM)
+#
+# Env: LLAMA_SWAP_URL (default http://127.0.0.1:8080)
+set -euo pipefail
+
+ENDPOINT="${LLAMA_SWAP_URL:-http://127.0.0.1:8080}"
+
+usage() {
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 1
+}
+
+[ $# -eq 1 ] || usage
+
+case "$1" in
+  -h|--help|help) usage ;;
+  list)
+    curl -sS "$ENDPOINT/v1/models" | jq -r '.data[].id'
+    ;;
+  status)
+    running=$(curl -sS "$ENDPOINT/running" | jq -r '.running[0].model // empty')
+    if [ -z "$running" ]; then
+      echo "(no model loaded)"
+    else
+      echo "$running"
+    fi
+    ;;
+  unload)
+    curl -sS "$ENDPOINT/unload" >/dev/null
+    echo "Unloaded." >&2
+    ;;
+  *)
+    model="$1"
+    if ! curl -sS "$ENDPOINT/v1/models" | jq -e --arg m "$model" '.data[] | select(.id==$m)' >/dev/null; then
+      echo "Unknown model: $model" >&2
+      echo "Configured models:" >&2
+      curl -sS "$ENDPOINT/v1/models" | jq -r '.data[].id' | sed 's/^/  /' >&2
+      exit 2
+    fi
+    echo "Preloading $model..." >&2
+    start=$(date +%s)
+    curl -sS -X POST "$ENDPOINT/v1/chat/completions" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -nc --arg m "$model" '{model:$m, messages:[{role:"user",content:"hi"}], max_tokens:1, stream:false}')" \
+      >/dev/null
+    echo "Ready in $(( $(date +%s) - start ))s." >&2
+    ;;
+esac
