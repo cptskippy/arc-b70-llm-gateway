@@ -425,7 +425,7 @@ Next steps:
   1. Reload your shell:   source ~/.bashrc
   2. Verify the B70:      sycl-ls
   3. Download GGUF models to ~/.lmstudio/models/
-  4. Run the b70-setup install script (llama-swap, opencode, pi configs)
+  4. Run scripts 03 and 04 to register models and start the service
 
 Quick server test (replace with your actual GGUF path):
   source /opt/intel/oneapi/setvars.sh

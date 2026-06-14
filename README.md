@@ -6,30 +6,35 @@ Single-port OpenAI-compatible chat-completions endpoint, backed by `llama.cpp` (
 
 ```
 OpenAI client
-      ↓  POST /v1/chat/completions  { "model": "qwen3.6-27b" | "gemma-4-31b" | "deepseek-r1-32b" }
+      ↓  POST /v1/chat/completions  { "model": "<any registered model>" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/.config/llama-swap/llama-swap.yaml
-      ↓  spawns/kills based on requested model
-http://127.0.0.1:9000
-  llama-server (SYCL build) ─────→ Intel Arc Pro B70 (XMX matmul)
-                                    GGUFs: ~/.lmstudio/models/...
+      ↓  routes to group, swaps within group, runs groups in parallel
+http://127.0.0.1:9000  http://127.0.0.1:9001  ...
+  llama-server (SYCL) ─────→ Intel Arc Pro B70 (XMX matmul)
+                              GGUFs: ~/.lmstudio/models/...
 ```
 
-Only one `llama-server` runs at a time. First request to a different model triggers a swap (~20–30 s cold load); subsequent requests stay warm. Models go idle and unload after `ttl: 600` s of no traffic.
+Models within the same group swap in and out of VRAM on demand. Models in different groups can run simultaneously (controlled by the `exclusive` setting in `llama-swap.yaml`). First request to a cold model triggers a load (~20–30 s for a 27B model); subsequent requests stay warm. Loaded models go idle and unload after `ttl: 1800` s of no traffic.
 
-## Models
+GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist. Use LM Studio or any other tool to download models, then run scripts 03 and 04 to register them.
 
-| Model | Path | Quant | Context | VRAM |
-|---|---|---|---|---|
-| `qwen3.6-27b` | `~/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf` | Q4_K_M | 256 K (q8_0 KV) | ~25 GB |
-| `gemma-4-31b` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-GGUF/gemma-4-31B-it-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~20 GB |
-| `deepseek-r1-32b` | `~/.lmstudio/models/lmstudio-community/DeepSeek-R1-Distill-Qwen-32B-GGUF/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~20 GB |
+## Workflow
 
-GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist.
+**Initial setup** (run once per machine):
+1. `01-install-firmware.sh` — firmware, driver, permissions
+2. `02-build-compute-stack.sh` — Intel compute stack + llama.cpp build
+
+**Add or update models** (run any time after initial setup):
+1. Drop GGUF files into `~/.lmstudio/models/` (e.g., via LM Studio)
+2. `bash 03-discover-models.sh` — generates per-model params from `llama.cpp.params.defaults`
+3. `bash 04-setup-service.sh` — builds `llama-swap.yaml`, configs, starts the service
+
+Scripts 03 and 04 are idempotent: safe to re-run whenever your model library changes. Script 03 skips existing `.params` files, so per-model customizations are preserved.
 
 ## Quick Start
 
-Run the three scripts in order on Ubuntu 24.04+ with kernel ≥ 6.17 and the B70 visible to `lspci`:
+Run the four scripts in order on Ubuntu 24.04+ with kernel ≥ 6.8 (≥ 6.17 preferred) and the B70 visible to `lspci`:
 
 ```bash
 # 1. Install xe firmware, load driver, set permissions
@@ -63,7 +68,7 @@ Total time: ~30–60 minutes (llama.cpp SYCL build is the longest step).
 systemctl --user status  llama-swap.service
 systemctl --user start   llama-swap.service
 systemctl --user stop    llama-swap.service
-systemctl --user restart llama-swap.service        # do this after editing llama-swap.yaml
+systemctl --user restart llama-swap.service        # do this after re-running 03 and 04, or editing llama-swap.yaml
 
 # Live logs
 journalctl --user -u llama-swap.service -f
@@ -72,21 +77,18 @@ journalctl --user -u llama-swap.service -f
 ## CLI Helper: `llm-swap`
 
 ```bash
-llm-swap qwen3.6-27b                        # preload (returns when warm — ~22 s cold, instant if already loaded)
-llm-swap gemma-4-31b
-llm-swap deepseek-r1-32b
+llm-swap <model>                            # preload (returns when warm — ~20–30 s cold, instant if already loaded)
 llm-swap list                               # configured models
 llm-swap status                             # currently loaded model(s)
 llm-swap unload                             # unload all models
-llm-swap unload qwen3.6-27b                 # unload a specific model
+llm-swap unload <model>                     # unload a specific model
 ```
 
 ## Using opencode
 
 ```bash
-opencode                                    # interactive TUI, default model (qwen3.6-27b)
-opencode -m local-b70/gemma-4-31b           # interactive TUI, Gemma
-opencode -m local-b70/deepseek-r1-32b       # interactive TUI, DeepSeek
+opencode                                    # interactive TUI, default model (first discovered)
+opencode -m local-b70/<model>               # interactive TUI, specific model
 opencode run "summarize this file" @file.py  # one-shot, default model
 ```
 
@@ -95,9 +97,8 @@ Inside the TUI, `/model` switches between models transparently.
 ## Using pi
 
 ```bash
-pi --provider local-b70 --model qwen3.6-27b
-pi --provider local-b70 --model gemma-4-31b -p "one-shot prompt"
-pi --provider local-b70 --model deepseek-r1-32b
+pi --provider local-b70 --model <model>
+pi --provider local-b70 --model <model> -p "one-shot prompt"
 ```
 
 ## Using the API Directly
@@ -106,7 +107,7 @@ pi --provider local-b70 --model deepseek-r1-32b
 curl http://127.0.0.1:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3.6-27b",
+    "model": "<model>",
     "messages": [{"role": "user", "content": "Hello"}],
     "max_tokens": 100
   }'
@@ -114,11 +115,15 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 ## Adding Another Model
 
-1. Drop the GGUF under `~/.lmstudio/models/<owner>/<repo>/`.
-2. Add a stanza to `~/.config/llama-swap/llama-swap.yaml` (copy a `cmd:` block, change `-m`, `-c`, `--alias`).
-3. Add the model to `~/.config/opencode/opencode.json` (under `provider.local-b70.models`).
-4. Add the model to `~/.pi/agent/models.json` (under the `local-b70` provider's `models` array).
-5. `systemctl --user restart llama-swap`.
+1. Drop the GGUF under `~/.lmstudio/models/` (e.g., via LM Studio).
+2. Re-run:
+   ```bash
+   bash 03-discover-models.sh
+   bash 04-setup-service.sh
+   ```
+   This auto-generates params from `llama.cpp.params.defaults`, rebuilds `llama-swap.yaml`, and refreshes opencode/pi configs. Script 04 starts the service automatically.
+
+To customize per-model parameters (context size, temperature, etc.), edit the model's `.llama.cpp.params` file before re-running the scripts. Script 03 skips existing params files, so customizations are preserved.
 
 ## File Locations
 
@@ -127,6 +132,8 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 | llama.cpp build | `~/llama.cpp/build/bin/` |
 | llama-swap binary | `~/.local/bin/llama-swap` |
 | llama-swap config | `~/.config/llama-swap/llama-swap.yaml` |
+| params defaults template | `llama.cpp.params.defaults` (in repo) |
+| per-model params | `<gguf>.llama.cpp.params` (next to each GGUF) |
 | systemd unit | `~/.config/systemd/user/llama-swap.service` |
 | opencode config | `~/.config/opencode/opencode.json` |
 | pi config | `~/.pi/agent/models.json` |
