@@ -2,10 +2,10 @@
 # llm-swap — preload / inspect / unload models in llama-swap.
 #
 # Usage:
-#   llm-swap <model>     preload <model> (warms it; subsequent requests are fast)
-#   llm-swap list        list configured models
-#   llm-swap status      show currently running model
-#   llm-swap unload      unload current model (frees VRAM)
+#   llm-swap <model>           preload <model> (warms it; subsequent requests are fast)
+#   llm-swap list              list configured models
+#   llm-swap status            show currently running model(s)
+#   llm-swap unload [model]    unload all models, or a specific one (frees VRAM)
 #
 # Env: LLAMA_SWAP_URL (default http://127.0.0.1:8080)
 set -euo pipefail
@@ -17,7 +17,7 @@ usage() {
   exit 1
 }
 
-[ $# -eq 1 ] || usage
+[ $# -eq 0 ] || [ $# -gt 2 ] && usage
 
 case "$1" in
   -h|--help|help) usage ;;
@@ -25,16 +25,28 @@ case "$1" in
     curl -sS "$ENDPOINT/v1/models" | jq -r '.data[].id'
     ;;
   status)
-    running=$(curl -sS "$ENDPOINT/running" | jq -r '.running[0].model // empty')
-    if [ -z "$running" ]; then
+models=$(curl -sS "$ENDPOINT/running" | jq -r '.running[]? | select(.state == "ready") | .model')
+    if [ -z "$models" ]; then
       echo "(no model loaded)"
     else
-      echo "$running"
+      echo "$models"
     fi
     ;;
   unload)
-    curl -sS "$ENDPOINT/unload" >/dev/null
-    echo "Unloaded." >&2
+    if [ $# -eq 2 ]; then
+      model="$2"
+      if ! curl -sS "$ENDPOINT/v1/models" | jq -e --arg m "$model" '.data[] | select(.id==$m)' >/dev/null; then
+        echo "Unknown model: $model" >&2
+        echo "Configured models:" >&2
+        curl -sS "$ENDPOINT/v1/models" | jq -r '.data[].id' | sed 's/^/  /' >&2
+        exit 2
+      fi
+      curl -sS "$ENDPOINT/unload?${model}" >/dev/null
+      echo "Unloaded $model." >&2
+    else
+      curl -sS "$ENDPOINT/unload" >/dev/null
+      echo "Unloaded all models." >&2
+    fi
     ;;
   *)
     model="$1"

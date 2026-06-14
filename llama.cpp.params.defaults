@@ -1,0 +1,26 @@
+# Default llama.cpp parameters for models on Intel Arc (SYCL/Level Zero).
+# One flag per line. Lines starting with # are comments and are ignored.
+#
+# The following variables are substituted at runtime:
+#   __PORT__       -> shared llama-server port (same for every model)
+#   __MODEL_NAME__ -> model alias derived from the GGUF folder name
+#
+# ── GPU offloading ──────────────────────────────────────────────
+-ngl 999
+
+# ── Context & cache ─────────────────────────────────────────────
+-c 65536
+-ctk q8_0
+-ctv q8_0
+
+# ── Attention & parallelism ─────────────────────────────────────
+-fa on
+--parallel 1
+
+# ── Network ─────────────────────────────────────────────────────
+--host 127.0.0.1
+--port __PORT__
+
+# ── Template & identity ─────────────────────────────────────────
+--jinja
+--alias __MODEL_NAME__

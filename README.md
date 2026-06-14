@@ -5,7 +5,7 @@ Single-port OpenAI-compatible chat-completions endpoint, backed by `llama.cpp` (
 ## Architecture
 
 ```
-opencode / pi / any OpenAI client
+OpenAI client
       ↓  POST /v1/chat/completions  { "model": "qwen3.6-27b" | "gemma-4-31b" | "deepseek-r1-32b" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/.config/llama-swap/llama-swap.yaml
@@ -38,8 +38,11 @@ sudo bash 01-install-firmware.sh
 # 2. Install Intel compute-runtime, oneAPI, build llama.cpp with SYCL
 bash 02-build-compute-stack.sh
 
-# 3. Install llama-swap service, opencode, pi, and wire everything together
-bash 03-setup-service.sh
+# 3. Auto-discover GGUF models and generate per-model params files
+bash 03-discover-models.sh
+
+# 4. Install llama-swap service, opencode, pi, and wire everything together
+bash 04-setup-service.sh
 ```
 
 Total time: ~30–60 minutes (llama.cpp SYCL build is the longest step).
@@ -50,7 +53,8 @@ Total time: ~30–60 minutes (llama.cpp SYCL build is the longest step).
 |---|---|
 | `01-install-firmware.sh` | Clones `linux-firmware`, installs `bmg_guc_70.bin` and `bmg_huc.bin`, loads the `xe` driver, adds user to `render`/`video` groups |
 | `02-build-compute-stack.sh` | Installs Intel compute-runtime + IGC from GitHub releases, Level Zero loader, oneAPI (compiler/MKL/TBB), clones and builds `llama.cpp` with SYCL backend |
-| `03-setup-service.sh` | Downloads `llama-swap` binary, installs `llm-swap` CLI helper, writes `llama-swap.yaml` config, creates systemd user service, configures `opencode` and `pi`, enables linger, starts the service |
+| `03-discover-models.sh` | Scans `~/.lmstudio/models/` for all `.gguf` files and generates per-model `llama.cpp.params` files from a shared defaults template |
+| `04-setup-service.sh` | Downloads `llama-swap` binary, installs `llm-swap` CLI helper, reads generated params files to build `llama-swap.yaml`, creates systemd user service, configures `opencode` and `pi`, enables linger, starts the service |
 
 ## Service Control
 
@@ -72,8 +76,9 @@ llm-swap qwen3.6-27b                        # preload (returns when warm — ~22
 llm-swap gemma-4-31b
 llm-swap deepseek-r1-32b
 llm-swap list                               # configured models
-llm-swap status                             # currently loaded model
-llm-swap unload                             # free VRAM
+llm-swap status                             # currently loaded model(s)
+llm-swap unload                             # unload all models
+llm-swap unload qwen3.6-27b                 # unload a specific model
 ```
 
 ## Using opencode
@@ -134,17 +139,12 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 **Server won't start, "out of memory" / "free memory target"** — VRAM is fragmented from prior process churn. Reboot is the cleanest fix; the `xe` driver doesn't always release Level-Zero allocations promptly.
 
-**Slow first response after switching models** — expected. The new model is loading from NVMe into VRAM. ~20–30 s for the 27B model. Keeps warm after that.
+**Slow first response after switching models** — expected. The new model is loading from NVMe into VRAM. ~20–30 s for a 27B model. Keeps warm after that.
 
 **`sycl-ls` or `icpx` not found** — source oneAPI first: `source /opt/intel/oneapi/setvars.sh`. The systemd unit already does this.
 
 **`FATAL: Unknown device: deviceId: e223`** — compute-runtime is too old. Install the latest from [GitHub releases](https://github.com/intel/compute-runtime/releases).
 
-**Things to avoid (lessons learned the hard way):**
-- Ollama on Intel: `OLLAMA_VULKAN=1`, `OLLAMA_NUM_GPU=999` etc. are not real env vars — pure hallucination.
-- IPEX-LLM Docker (`intelanalytics/ipex-llm-serving-xpu`): XPU device count goes to zero inside the container on this combo. Skip.
-- OpenVINO IR conversion via `optimum-cli`: doesn't recognize bleeding-edge architectures yet. Not worth fighting.
-- Always run through the SYCL build, not Vulkan — Vulkan doesn't use XMX and gets ~75% lower throughput.
 
 ## Credits
 
