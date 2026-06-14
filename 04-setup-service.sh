@@ -238,8 +238,8 @@ while IFS= read -r -d '' gguf; do
     fi
 
     # Everything else is an extra flag to pass through
-    extra_flags+="$line
-      "
+    extra_flags+="      $line
+"
   done < "$params_file"
 
   if [[ -z "$alias_val" ]]; then
@@ -302,7 +302,7 @@ fi
     echo "    proxy: http://127.0.0.1:${port_val}"
     echo "    ttl: $LLAMA_MODEL_TTL"
     echo "    cmd: >"
-    echo "      bash -c \"source /opt/intel/oneapi/setvars.sh > /dev/null && exec ${LLAMA_SERVER_BIN}"
+    echo "      bash -c \"source /opt/intel/oneapi/setvars.sh; exec ${LLAMA_SERVER_BIN}"
     echo "      -m ${gguf}"
 
     # Emit extra flags (preserving one-per-line formatting for readability)
@@ -311,7 +311,6 @@ fi
     fi
 
     echo "      --host 127.0.0.1 --port ${port_val}"
-    echo "      --jinja"
     echo "      --alias ${alias_val}"
     if [[ -n "$verbose" ]]; then
       echo "      --verbose"
@@ -355,7 +354,7 @@ After=network.target
 Type=simple
 # Source oneAPI environment so llama-server can find SYCL/Level-Zero
 Environment="PATH=/opt/intel/oneapi/compiler/latest/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/bin/bash -c 'source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 && exec %h/.local/bin/llama-swap --config %h/.config/llama-swap/llama-swap.yaml --listen 0.0.0.0:${LLAMA_SWAP_PORT}'
+ExecStart=/bin/bash -c 'source /opt/intel/oneapi/setvars.sh --force; exec %h/.local/bin/llama-swap --config %h/.config/llama-swap/llama-swap.yaml --listen 0.0.0.0:${LLAMA_SWAP_PORT}'
 Restart=on-failure
 RestartSec=5
 
