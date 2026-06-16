@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# =============================================================================
+# Install Battlemage GPU firmware and load the xe kernel driver.
+#
+# Clones the linux-firmware repository, installs the Battlemage GuC and HuC
+# firmware blobs (bmg_guc_70.bin, bmg_huc.bin) into /lib/firmware/xe/, then
+# loads or reloads the xe kernel driver. Finally verifies the driver is bound
+# to the GPU and adds the current user to the render/video groups for access.
+#
+# Assumes:
+#   - Ubuntu 24.04 (or compatible)
+#   - Kernel >= 6.8 with xe driver support for Battlemage
+#   - You have sudo access
+#
+# Run with: sudo bash 01-install-firmware.sh
+# =============================================================================
 
 set -euo pipefail
 

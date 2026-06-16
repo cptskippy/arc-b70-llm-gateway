@@ -1,6 +1,6 @@
-# Local LLM Gateway — Intel Arc Pro B70
+# Intel Battlemage GPU Local LLM Stack
 
-Single-port OpenAI-compatible chat-completions endpoint, backed by `llama.cpp` (SYCL/Level-Zero → XMX) and fronted by `llama-swap` for transparent model switching on a single Intel Arc Pro B70 GPU.
+Single-port OpenAI-compatible chat-completions endpoint, backed by `llama.cpp` (SYCL/Level-Zero → XMX) and fronted by `llama-swap` for transparent model switching on an Intel Battlemage GPU. Compatible with Arc B570, B580, Pro B70, and other Battlemage (Xe2) GPUs.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/.config/llama-swap/llama-swap.yaml
       ↓  routes to group, swaps within group, runs groups in parallel
 http://127.0.0.1:9000  http://127.0.0.1:9001  ...
-  llama-server (SYCL) ─────→ Intel Arc Pro B70 (XMX matmul)
+  llama-server (SYCL) ─────→ Intel Battlemage GPU (XMX matmul)
                               GGUFs: ~/.lmstudio/models/...
 ```
 
@@ -34,7 +34,7 @@ Scripts 03 and 04 are idempotent: safe to re-run whenever your model library cha
 
 ## Quick Start
 
-Run the four scripts in order on Ubuntu 24.04+ with kernel ≥ 6.8 (≥ 6.17 preferred) and the B70 visible to `lspci`:
+Run the four scripts in order on Ubuntu 24.04+ with kernel ≥ 6.8 (≥ 6.17 preferred) and a Battlemage GPU visible to `lspci`:
 
 ```bash
 # 1. Install xe firmware, load driver, set permissions

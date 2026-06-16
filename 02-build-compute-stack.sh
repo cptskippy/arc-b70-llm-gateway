@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# b70-prereqs-install.sh
 # Installs the Intel dependencies and llama.cpp SYCL build needed to run
-# a local LLM stack on an Intel Arc Pro B70 (USB4 eGPU).
+# a local LLM stack on an Intel Battlemage GPU.
 #
 # Assumes:
 #   - Ubuntu 24.04 (or compatible)
 #   - Kernel 7.x (xe driver already present — no kernel changes needed)
-#   - B70 connected via USB4 and visible to lspci
+#   - Battlemage GPU connected and visible to lspci
 #   - You have sudo access
 #
-# Run with: bash b70-prereqs-install.sh
+# Run with: bash 02-build-compute-stack.sh
 # =============================================================================
 
 # Re-exec under bash if invoked as sh (dash doesn't support [[ or arrays)
@@ -44,14 +43,12 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not f
 
 log "Checking environment..."
 
-if lspci | grep -qi "Arc Pro B70"; then
-  info "Intel Arc Pro B70 detected."
-elif lspci | grep -qi "Battlemage"; then
+if lspci | grep -qi "Battlemage"; then
   info "Intel Battlemage GPU detected."
 else
   echo ""
-  echo "WARN: Arc Pro B70 not found in lspci output."
-  echo "      Make sure the eGPU is connected via USB4 before continuing."
+  echo "WARN: No Intel Battlemage GPU found in lspci output."
+  echo "      Make sure the GPU is connected before continuing."
   printf "      Continue anyway? [y/N] "
   read -r yn
   case "$yn" in
@@ -264,10 +261,10 @@ log "Verifying Level Zero backend..."
 if command -v sycl-ls >/dev/null 2>&1; then
   SYCL_OUTPUT=$(sycl-ls 2>&1)
   if echo "$SYCL_OUTPUT" | grep -qi "level_zero"; then
-    info "B70 is visible as a Level Zero device."
-    echo "$SYCL_OUTPUT" | grep -i "Arc" | sed 's/^/    /' || true
+    info "Battlemage GPU is visible as a Level Zero device."
+    echo "$SYCL_OUTPUT" | grep -iE "Arc|Battlemage" | sed 's/^/    /' || true
   else
-    info "WARN: B70 is still using OpenCL backend. Verify libze_loader.so is present:"
+    info "WARN: Battlemage GPU is still using OpenCL backend. Verify libze_loader.so is present:"
     info "  ldconfig -p | grep libze_loader"
     info "  sycl-ls --verbose"
   fi
@@ -278,10 +275,10 @@ fi
 # Verify
 log "Verifying compute-runtime..."
 if command -v clinfo >/dev/null 2>&1; then
-  if clinfo | grep -qi "Intel(R) Arc(TM) Pro B70"; then
-    info "clinfo confirms B70 is visible to OpenCL."
+  if clinfo --prop CL_DEVICE_NAME | grep -qi "Intel(R) Arc(TM) Pro B"; then
+    info "clinfo confirms Battlemage GPU is visible to OpenCL."
   else
-    info "WARN: B70 not listed in clinfo yet — a re-login or reboot may be needed."
+    info "WARN: Battlemage GPU not listed in clinfo yet — a re-login or reboot may be needed."
   fi
 else
   info "(clinfo not installed — skipping OpenCL verification)"
@@ -346,11 +343,11 @@ else
 fi
 
 log "Checking SYCL device enumeration..."
-if sycl-ls 2>/dev/null | grep -qi "Arc"; then
-  info "B70 is visible as a SYCL device."
-  sycl-ls 2>/dev/null | grep -i "Arc" | sed 's/^/    /' || true
+if sycl-ls 2>/dev/null | grep -qi "Arc(TM) Pro B"; then
+  info "Battlemage GPU is visible as a SYCL device."
+  sycl-ls 2>/dev/null | grep -i "Arc(TM) Pro B" | sed 's/^/    /' || true
 else
-  info "WARN: B70 not found in sycl-ls yet. A reboot may be required."
+  info "WARN: Battlemage GPU not found in sycl-ls yet. A reboot may be required."
   info "Full sycl-ls output:"
   sycl-ls 2>/dev/null | sed 's/^/    /' || true
 fi
@@ -423,7 +420,7 @@ cat <<SUMMARY
 
 Next steps:
   1. Reload your shell:   source ~/.bashrc
-  2. Verify the B70:      sycl-ls
+  2. Verify GPU:          sycl-ls
   3. Download GGUF models to ~/.lmstudio/models/
   4. Run scripts 03 and 04 to register models and start the service
 
