@@ -21,16 +21,16 @@ This stack is designed to work with any Intel Battlemage (Xe2) GPU, though it ha
 OpenAI client
       ↓  POST /v1/chat/completions  { "model": "<any registered model>" }
 http://127.0.0.1:8080
-  llama-swap                          ← model registry: ~/.config/llama-swap/llama-swap.yaml
-      ↓  routes to group, swaps within group, runs groups in parallel
+ llama-swap                          ← model registry: `$LLAMA_SWAP_CONFIG` (default: `~/.config/llama-swap/llama-swap.yaml`)
+       ↓  routes to group, swaps within group, runs groups in parallel
 http://127.0.0.1:9000  http://127.0.0.1:9001  ...
-  llama-server (SYCL) ─────→ Intel Battlemage GPU (XMX matmul)
-                              GGUFs: ~/.lmstudio/models/...
+   llama-server (SYCL) ─────→ Intel Battlemage GPU (XMX matmul)
+                               GGUFs: `$MODELS_DIR` (default: `~/.lmstudio/models/`)
 ```
 
 Models within the same group swap in and out of VRAM on demand. Models in different groups can run simultaneously (controlled by the `exclusive` setting in `llama-swap.yaml`). First request to a cold model triggers a load (~20–30 s for a 27B model); subsequent requests stay warm. Loaded models go idle and unload if no traffic after the timeout period specified in the service setup script.
 
-GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist. Use LM Studio or any other tool to download models, then run scripts 03 and 04 to register them.
+GGUFs live under `$MODELS_DIR` (default: `~/.lmstudio/models/`) so LM Studio sees them too — both stacks coexist. Use LM Studio or any other tool to download models, then run scripts 03 and 04 to register them.
 
 ## Workflow
 
@@ -39,7 +39,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 2. `02-build-compute-stack.sh` — Intel compute stack + llama.cpp build
 
 **Add or update models** (run any time after initial setup):
-1. Drop GGUF files into `~/.lmstudio/models/` (e.g., via LM Studio)
+1. Drop GGUF files into `$MODELS_DIR` (default: `~/.lmstudio/models/`) (e.g., via LM Studio)
 2. `bash 03-discover-models.sh` — generates per-model params from `llama.cpp.params.defaults`
 3. `bash 04-setup-service.sh` — builds `llama-swap.yaml`, configs, starts the service
 
@@ -71,7 +71,7 @@ Total time: ~30–60 minutes (llama.cpp SYCL build is the longest step).
 |---|---|
 | `01-install-firmware.sh` | Clones `linux-firmware`, installs `bmg_guc_70.bin` and `bmg_huc.bin`, loads the `xe` driver, adds user to `render`/`video` groups |
 | `02-build-compute-stack.sh` | Installs Intel compute-runtime + IGC from GitHub releases, Level Zero loader, oneAPI (compiler/MKL/TBB), clones and builds `llama.cpp` with SYCL backend |
-| `03-discover-models.sh` | Scans `~/.lmstudio/models/` for all `.gguf` files and generates per-model `llama.cpp.params` files from a shared defaults template |
+| `03-discover-models.sh` | Scans `$MODELS_DIR` (default: `~/.lmstudio/models/`) for all `.gguf` files and generates per-model `llama.cpp.params` files from a shared defaults template |
 | `04-setup-service.sh` | Downloads `llama-swap` binary, installs `llm-swap` CLI helper, reads generated params files to build `llama-swap.yaml`, creates systemd user service, configures `opencode` and `pi`, enables linger, starts the service |
 
 ## Service Control
@@ -128,7 +128,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 ## Adding Another Model
 
-1. Drop the GGUF under `~/.lmstudio/models/` (e.g., via LM Studio).
+1. Drop the GGUF under `$MODELS_DIR` (default: `~/.lmstudio/models/`) (e.g., via LM Studio).
 2. Re-run:
    ```bash
    bash 03-discover-models.sh
@@ -142,15 +142,15 @@ To customize per-model parameters (context size, temperature, etc.), edit the mo
 
 | Component | Path |
 |---|---|
-| llama.cpp build | `~/llama.cpp/build/bin/` |
+| llama.cpp build (`LLAMA_SERVER_BIN`) | `~/llama.cpp/build/bin/llama-server` (default) |
 | llama-swap binary | `~/.local/bin/llama-swap` |
-| llama-swap config | `~/.config/llama-swap/llama-swap.yaml` |
+| llama-swap config (`LLAMA_SWAP_CONFIG`) | `~/.config/llama-swap/llama-swap.yaml` (default) |
 | params defaults template | `llama.cpp.params.defaults` (in repo) |
 | per-model params | `<gguf>.llama.cpp.params` (next to each GGUF) |
 | systemd unit | `~/.config/systemd/user/llama-swap.service` |
 | opencode config | `~/.config/opencode/opencode.json` |
 | pi config | `~/.pi/agent/models.json` |
-| GGUFs | `~/.lmstudio/models/` |
+| GGUFs (`MODELS_DIR`) | `~/.lmstudio/models/` (default) |
 | Intel oneAPI | `/opt/intel/oneapi/` |
 
 ## Troubleshooting
