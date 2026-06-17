@@ -1,6 +1,19 @@
 # Intel Battlemage GPU Local LLM Stack
 
-Single-port OpenAI-compatible chat-completions endpoint, backed by `llama.cpp` (SYCL/Level-Zero → XMX) and fronted by `llama-swap` for transparent model switching on an Intel Battlemage GPU. Compatible with Arc B570, B580, Pro B70, and other Battlemage (Xe2) GPUs.
+Single-port OpenAI-compatible chat-completions endpoint, backed by `llama.cpp` (SYCL/Level-Zero → XMX) and fronted by `llama-swap` for transparent model switching on an Intel Battlemage (Xe2) GPU.
+
+## Compatibility
+
+This stack is designed to work with any Intel Battlemage (Xe2) GPU, though it has only been tested on the Arc Pro B70.
+
+| GPU | Compatible |
+|---|---|
+| Intel® Arc™ B570 Graphics | ❔ |
+| Intel® Arc™ B580 Graphics | ❔ |
+| Intel® Arc™ Pro B50 Graphics | ❔ |
+| Intel® Arc™ Pro B60 Graphics | ❔ |
+| Intel® Arc™ Pro B65 Graphics | ❔ |
+| Intel® Arc™ Pro B70 Graphics | ✅ |
 
 ## Architecture
 
@@ -15,7 +28,7 @@ http://127.0.0.1:9000  http://127.0.0.1:9001  ...
                               GGUFs: ~/.lmstudio/models/...
 ```
 
-Models within the same group swap in and out of VRAM on demand. Models in different groups can run simultaneously (controlled by the `exclusive` setting in `llama-swap.yaml`). First request to a cold model triggers a load (~20–30 s for a 27B model); subsequent requests stay warm. Loaded models go idle and unload after `ttl: 1800` s of no traffic.
+Models within the same group swap in and out of VRAM on demand. Models in different groups can run simultaneously (controlled by the `exclusive` setting in `llama-swap.yaml`). First request to a cold model triggers a load (~20–30 s for a 27B model); subsequent requests stay warm. Loaded models go idle and unload if no traffic after the timeout period specified in the service setup script.
 
 GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist. Use LM Studio or any other tool to download models, then run scripts 03 and 04 to register them.
 
