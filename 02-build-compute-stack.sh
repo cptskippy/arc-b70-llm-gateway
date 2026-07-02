@@ -28,14 +28,18 @@ LLAMA_DIR="$HOME/llama.cpp"
 # Pin to a specific tag if needed, e.g.: CR_VERSION="26.09.32308.3"
 CR_VERSION=""
 
+# Level Zero loader version. Leave empty to auto-fetch latest from GitHub.
+ZE_LOADER_VERSION=""
+
 # Number of parallel compile jobs
 JOBS=$(nproc)
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 log()  { echo ""; echo "==> $*"; }
-info() { echo "    $*" >&2; }   # stderr so it doesn't pollute $() captures
-die()  { echo ""; echo "ERROR: $*" >&2; exit 1; }
+info() { echo "    $*" >&2; }
+warn() { echo "WARN: $*" >&2; }
+die()  { echo "ERROR: $*" >&2; exit 1; }
 
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not found."; }
 
@@ -219,13 +223,30 @@ fi
 
 log "Installing Level Zero loader..."
 
-# Check if already installed
-if dpkg -l libze1 >/dev/null 2>&1; then
-  info "Level Zero loader already installed — skipping."
-else
+# Determine target version: fetch latest if var empty, otherwise use specified version
+INSTALLED_ZE=$(dpkg -l libze1 2>/dev/null | awk '/^ii/{print $3}' | head -1 || true)
+
+if [ -z "$ZE_LOADER_VERSION" ]; then
   ZE_LOADER_VERSION=$(curl -fsSL \
     "https://api.github.com/repos/oneapi-src/level-zero/releases/latest" \
     | grep '"tag_name"' | head -1 | cut -d '"' -f 4 | sed 's/^v//' || true)
+  info "ZE_LOADER_VERSION not set — targeting latest: $ZE_LOADER_VERSION"
+fi
+
+if [ -n "$INSTALLED_ZE" ]; then
+  info "Level Zero loader already installed: $INSTALLED_ZE"
+  if [ "$INSTALLED_ZE" = "$ZE_LOADER_VERSION" ]; then
+    info "Installed version matches target — skipping."
+    SKIP_ZE=1
+  else
+    info "Installed version ($INSTALLED_ZE) differs from target ($ZE_LOADER_VERSION) — upgrading."
+  fi
+else
+  info "Level Zero loader not installed — installing $ZE_LOADER_VERSION"
+fi
+
+SKIP_ZE=${SKIP_ZE:-0}
+if [ "$SKIP_ZE" -eq 0 ]; then
   info "Level Zero SDK version: $ZE_LOADER_VERSION"
 
   # Determine Ubuntu codename for deb selection
@@ -244,14 +265,16 @@ else
   esac
 
   ZE_DEB_NAME="libze1_${ZE_LOADER_VERSION}+${ZE_DEB_SUFFIX}_amd64.deb"
-  ZE_DEB_URL="https://github.com/oneapi-src/level-zero/releases/download/v${ZE_LOADER_VERSION}/${ZE_DEB_NAME}"
+  ZE_DEV_DEB_NAME="libze-dev_${ZE_LOADER_VERSION}+${ZE_DEB_SUFFIX}_amd64.deb"
+  ZE_BASE_URL="https://github.com/oneapi-src/level-zero/releases/download/v${ZE_LOADER_VERSION}"
 
-  info "Downloading ${ZE_DEB_NAME}..."
+  info "Downloading ${ZE_DEB_NAME} and ${ZE_DEV_DEB_NAME}..."
   ZE_TMP=$(mktemp -d)
   # shellcheck disable=SC2064
   trap "rm -rf '$ZE_TMP'" EXIT
-  curl -fsSL -o "$ZE_TMP/libze1.deb" "$ZE_DEB_URL"
-  sudo dpkg -i "$ZE_TMP/libze1.deb" || sudo apt-get install -f -y
+  curl -fsSL -o "$ZE_TMP/libze1.deb" "${ZE_BASE_URL}/${ZE_DEB_NAME}"
+  curl -fsSL -o "$ZE_TMP/libze-dev.deb" "${ZE_BASE_URL}/${ZE_DEV_DEB_NAME}"
+  sudo dpkg -i "$ZE_TMP/libze1.deb" "$ZE_TMP/libze-dev.deb" || sudo apt-get install -f -y
   sudo ldconfig
   rm -rf "$ZE_TMP"
 
@@ -319,14 +342,13 @@ fi
 
 sudo apt-get update -qq
 
-if command -v icpx >/dev/null 2>&1; then
-  info "icpx already on PATH — skipping oneAPI package install."
-elif [ -f /opt/intel/oneapi/compiler/latest/bin/icpx ]; then
+# Install oneAPI if not already present (apt handles updates)
+if command -v icpx >/dev/null 2>&1 || [ -f /opt/intel/oneapi/compiler/latest/bin/icpx ]; then
   info "oneAPI compiler already installed — skipping."
 else
   log "Installing Intel oneAPI compiler, MKL, and TBB (~3 GB)..."
   sudo apt-get install -y \
-    intel-oneapi-dpcpp-cpp \
+    intel-oneapi-compiler-dpcpp-cpp \
     intel-oneapi-mkl-devel \
     intel-oneapi-tbb-devel
   info "oneAPI packages installed."
@@ -335,9 +357,13 @@ fi
 log "Sourcing oneAPI environment..."
 # setvars.sh writes to stdout and may exit non-zero in some configurations.
 # shellcheck disable=SC1091
-source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 \
-  || die "Failed to activate oneAPI environment."
-info "oneAPI environment active."
+if ! command -v icpx >/dev/null 2>&1; then
+  info "oneAPI not active, running setvars.sh"
+  source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 \
+    || die "Failed to activate oneAPI environment."
+else
+  info "oneAPI already active — skipping setvars.sh"
+fi
 
 if command -v icpx >/dev/null 2>&1; then
   info "icpx: $(icpx --version 2>&1 | head -1)"
@@ -372,11 +398,18 @@ info "Using $JOBS parallel jobs."
 
 # Re-source oneAPI in case the environment was reset
 # shellcheck disable=SC1091
-source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 \
-  || die "Failed to activate oneAPI environment."
-info "oneAPI environment active."
+if ! command -v icpx >/dev/null 2>&1; then
+  source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 \
+    || die "Failed to activate oneAPI environment."
+  info "oneAPI environment active."
+else
+  info "oneAPI already active — skipping setvars.sh"
+fi
 
 cd "$LLAMA_DIR"
+
+# Remove stale cmake cache to avoid version mismatch between compiler paths
+rm -rf build
 
 cmake -S . -B build -G Ninja \
   -DGGML_SYCL=ON \
@@ -387,6 +420,7 @@ cmake -S . -B build -G Ninja \
 cmake --build build -j"$JOBS"
 
 LLAMA_SERVER="$LLAMA_DIR/build/bin/llama-server"
+
 if [ -f "$LLAMA_SERVER" ]; then
   info "Build succeeded: $LLAMA_SERVER"
 else

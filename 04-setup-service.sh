@@ -81,9 +81,14 @@ LLAMA_GROUP_EXCLUSIVE=false
 # Linger user (the user whose session hosts the systemd unit)
 LINGER_USER="${USER}"
 
+# Default model alias — must match one of the discovered --alias values.
+# Leave empty or set to a non-existent alias to fall back to the first discovered model.
+DEFAULT_MODEL_ALIAS="qwen3-6-27b-q6-k"
+
 # ─────────────────────────────────────────────────────────────────────────────
 
-log()  { echo "==> $*"; }
+log()  { echo ""; echo "==> $*"; }
+info() { echo "    $*" >&2; }
 warn() { echo "WARN: $*" >&2; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
@@ -96,13 +101,22 @@ log "Checking prerequisites..."
 
 # Source oneAPI so sycl-ls and icpx are on PATH for the rest of this script
 # shellcheck disable=SC1091
-#source /opt/intel/oneapi/setvars.sh --force 2>/dev/null || true
+if ! command -v icpx >/dev/null 2>&1; then
+  log "Sourcing oneAPI environment..."
+  source /opt/intel/oneapi/setvars.sh --force 2>&1
+else
+  info "oneAPI already active  — skipping setvars.sh"
+fi
 
-#command -v sycl-ls >/dev/null 2>&1 \
-#  || die "sycl-ls not found after sourcing oneAPI. Check your oneAPI install."
+command -v sycl-ls >/dev/null 2>&1 \
+  || die "sycl-ls not found after sourcing oneAPI. Check your oneAPI install."
 
-#sycl-ls | grep -qi "level_zero" \
-#  || warn "No Level Zero device found via sycl-ls. The Battlemage GPU may not be detected yet."
+SYCL_OUTPUT=$(sycl-ls 2>&1) || true
+if echo "$SYCL_OUTPUT" | grep -qi "level_zero"; then
+  info "Level Zero device found via sycl-ls."
+else
+  warn "No Level Zero device found via sycl-ls. The Battlemage GPU may not be detected yet."
+fi
 
 [[ -f "$LLAMA_SERVER_BIN" ]] \
   || die "llama-server not found at $LLAMA_SERVER_BIN. Build llama.cpp with SYCL first."
@@ -129,8 +143,11 @@ else
 fi
 
 SKIP_SWAP=0
+SWAP_VERSION_FILE="$HOME/.local/bin/llama-swap.version"
 if command -v llama-swap >/dev/null 2>&1; then
-  INSTALLED_SWAP=$(llama-swap version 2>/dev/null | grep -oP 'version:\s*\K[0-9]+' || true)
+  # Read version from sidecar file written at install time.
+  # (llama-swap version requires a config and errors out without one.)
+  INSTALLED_SWAP=$(cat "$SWAP_VERSION_FILE" 2>/dev/null || true)
   if [[ -n "$INSTALLED_SWAP" ]]; then
     info "llama-swap already installed: $INSTALLED_SWAP"
     if [[ "$INSTALLED_SWAP" -ge "$LLAMA_SWAP_LATEST" ]] 2>/dev/null; then
@@ -140,7 +157,7 @@ if command -v llama-swap >/dev/null 2>&1; then
       info "Installed version ($INSTALLED_SWAP) is older than target ($LLAMA_SWAP_LATEST) — upgrading."
     fi
   else
-    warn "Could not parse llama-swap version — will re-install."
+    warn "Could not determine llama-swap version — will re-install."
   fi
 fi
 
@@ -173,6 +190,7 @@ if [[ "$SKIP_SWAP" -eq 0 ]]; then
   fi
 
   install -m 755 "$LLAMA_SWAP_BIN" "$HOME/.local/bin/llama-swap"
+  echo "$LLAMA_SWAP_LATEST" > "$SWAP_VERSION_FILE"
 
   log "Installed llama-swap:"
   "$HOME/.local/bin/llama-swap" version || true
@@ -407,7 +425,23 @@ OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
 mkdir -p "$OPENCODE_CONFIG_DIR"
 
 # Build model entries from discovered models.
-default_model="${DIS_ALIAS[0]}"
+if [[ -n "$DEFAULT_MODEL_ALIAS" ]]; then
+  alias_found=false
+  for alias_val in "${DIS_ALIAS[@]}"; do
+    if [[ "$alias_val" == "$DEFAULT_MODEL_ALIAS" ]]; then
+      alias_found=true
+      break
+    fi
+  done
+  if $alias_found; then
+    default_model="$DEFAULT_MODEL_ALIAS"
+  else
+    warn "Default model alias \"$DEFAULT_MODEL_ALIAS\" not found in discovered models — falling back to \"${DIS_ALIAS[0]}\"."
+    default_model="${DIS_ALIAS[0]}"
+  fi
+else
+  default_model="${DIS_ALIAS[0]}"
+fi
 
 {
   echo '{'
@@ -452,7 +486,7 @@ if ! command -v opencode >/dev/null 2>&1; then
   if command -v npm >/dev/null 2>&1; then
     npm install -g opencode-ai
   else
-    warn "npm not found. Install Node.js, then run: npm install -g opencode"
+    warn "npm not found. Install Node.js, then run: npm install -g opencode-ai"
   fi
 else
   log "opencode already installed: $(command -v opencode)"
@@ -543,7 +577,7 @@ ${model_list}  llm-swap list | status | unload
 
 opencode (interactive TUI):
   opencode                                    # default model (${default_model})
-  opencode -m local/<model>               # switch model
+  opencode -m local/<model>                   # switch model
 
 pi coding agent:
   pi --provider local --model <model>
